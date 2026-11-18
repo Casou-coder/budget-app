@@ -52,7 +52,7 @@ const Parsers = (() => {
     const rows = splitCSV(text);
     if (rows.length < 2) throw new Error('Fichier vide ou illisible');
     // trouver la ligne d'en-tête (CIC peut ajouter des lignes avant)
-    let hi = rows.findIndex(r => r.some(c => /date|datum/i.test(norm(c))));
+    let hi = rows.findIndex(r => r.some(c => /date|datum|isin/i.test(norm(c))));
     if (hi < 0) throw new Error("Aucune colonne 'Date' trouvée");
     const h = rows[hi];
 
@@ -68,7 +68,7 @@ const Parsers = (() => {
 
     const out = []; let lastBalance = null;
     for (const r of rows.slice(hi + 1)) {
-      const date = parseDate(r[iDate]);
+      const date = iDate >= 0 ? parseDate(r[iDate]) : null;
       if (!date) continue;
       let amount;
       if (iDeb >= 0 || iCred >= 0) {
@@ -81,7 +81,7 @@ const Parsers = (() => {
       if (iIsin >= 0 && r[iIsin]) label = (label ? label + ' ' : '') + r[iIsin].trim();
       if (type && !label.toLowerCase().includes(type.toLowerCase())) label = `${type} · ${label}`.replace(/ · $/, '');
       out.push({ date, amount: Math.round(amount * 100) / 100, label: label || type || 'Opération', type });
-      if (iBal >= 0) { const b = parseNumber(r[iBal]); if (!isNaN(b)) lastBalance = { date, value: b }; }
+      if (iBal >= 0) { const b = parseNumber(r[iBal]); if (!isNaN(b) && (!lastBalance || date >= lastBalance.date)) lastBalance = { date, value: b }; }
     }
     const positionsMode = !out.length && iIsin >= 0 && iNet >= 0;
     if (positionsMode) return { kind: 'positions', positions: parsePositions(rows.slice(hi + 1), h, iIsin, iQty, iNet) };
