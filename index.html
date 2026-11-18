@@ -6,14 +6,18 @@
 <meta name="theme-color" content="#0f172a">
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="icon" href="icon.svg" type="image/svg+xml">
-<link rel="apple-touch-icon" href="icon.svg">
+<link rel="apple-touch-icon" href="icon-180.png">
 <meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Budget">
 <title>Mon Budget</title>
 <style>
 :root{--bg:#f6f7fb;--card:#fff;--fg:#0f172a;--mut:#64748b;--line:#e2e8f0;--acc:#2563eb;--pos:#16a34a;--neg:#dc2626;--warn:#d97706}
 @media (prefers-color-scheme:dark){:root{--bg:#0b1120;--card:#111a2e;--fg:#e2e8f0;--mut:#94a3b8;--line:#1e293b;--acc:#60a5fa;--pos:#4ade80;--neg:#f87171;--warn:#fbbf24}}
 *{box-sizing:border-box}
-body{margin:0;font:15px/1.4 system-ui,-apple-system,Segoe UI,Roboto,sans-serif;background:var(--bg);color:var(--fg);padding-bottom:calc(70px + env(safe-area-inset-bottom))}
+html{-webkit-text-size-adjust:100%}
+body{-webkit-user-select:none;user-select:none;margin:0;font:15px/1.4 system-ui,-apple-system,Segoe UI,Roboto,sans-serif;background:var(--bg);color:var(--fg);padding-bottom:calc(70px + env(safe-area-inset-bottom))}
 header{position:sticky;top:0;z-index:5;background:var(--bg);padding:calc(10px + env(safe-area-inset-top)) 16px 8px;display:flex;align-items:center;gap:8px}
 header h1{font-size:20px;margin:0;flex:1}
 main{padding:0 16px;max-width:720px;margin:0 auto}
@@ -36,17 +40,19 @@ main{padding:0 16px;max-width:720px;margin:0 auto}
 .chart .pair i{width:40%;border-radius:3px 3px 0 0;min-height:2px}
 .in{background:var(--pos)}.out{background:var(--neg)}
 nav{position:fixed;bottom:0;left:0;right:0;display:flex;background:var(--card);border-top:1px solid var(--line);padding-bottom:env(safe-area-inset-bottom);z-index:9}
-nav button{flex:1;border:0;background:none;color:var(--mut);padding:10px 0;font-size:11px}
+nav button{flex:1;border:0;background:none;color:var(--mut);padding:8px 0;font-size:10.5px;-webkit-tap-highlight-color:transparent}
 nav button b{display:block;font-size:20px;font-weight:400}
 nav button.on{color:var(--acc)}
 button,select,input{font:inherit;color:inherit}
 .btn{background:var(--acc);color:#fff;border:0;border-radius:10px;padding:10px 14px;font-weight:600}
 .btn.sec{background:var(--line);color:var(--fg)}.btn.sm{padding:6px 10px;font-size:13px}
-input,select{background:var(--bg);border:1px solid var(--line);border-radius:10px;padding:9px 10px;width:100%}
+input,select{font-size:16px;background:var(--bg);border:1px solid var(--line);border-radius:10px;padding:9px 10px;width:100%}
 label{display:block;font-size:13px;color:var(--mut);margin:8px 0 4px}
 .grid2{display:grid;grid-template-columns:1fr 1fr;gap:8px}
 .tag{display:inline-block;font-size:11px;padding:2px 8px;border-radius:99px;background:var(--line);color:var(--fg)}
 .hide{display:none!important}
+input{-webkit-user-select:text;user-select:text}
+details summary{cursor:pointer;font-size:13px}
 .toast{position:fixed;left:16px;right:16px;bottom:90px;background:var(--fg);color:var(--bg);padding:12px;border-radius:10px;text-align:center;z-index:20}
 dialog{border:0;border-radius:14px;background:var(--card);color:var(--fg);width:min(94vw,520px);padding:16px}
 dialog::backdrop{background:#0008}
@@ -67,6 +73,7 @@ dialog::backdrop{background:#0008}
 <main id="view"></main>
 <nav id="nav">
   <button data-v="dash" class="on"><b>◎</b>Budget</button>
+  <button data-v="profile"><b>☺</b>Profil</button>
   <button data-v="tx"><b>≡</b>Opérations</button>
   <button data-v="wealth"><b>▲</b>Patrimoine</button>
   <button data-v="import"><b>⇪</b>Import</button>
@@ -74,6 +81,8 @@ dialog::backdrop{background:#0008}
 </nav>
 <dialog id="dlg"></dialog>
 <script src="parsers.js"></script>
+<script src="insights.js"></script>
+<script src="bank.js"></script>
 <script src="app.js"></script>
 </body>
 </html>
