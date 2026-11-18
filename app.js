@@ -123,7 +123,7 @@ views.dash = () => {
       <div class="mut" style="font-size:13px">Courant ${fmt(w.by.courant)} · Épargne ${fmt(w.by.epargne)} · Placements ${fmt(w.by.invest)}${w.by.autre ? ' · Autres ' + fmt(w.by.autre) : ''}</div></div>
   </div>
   ${totalBudget ? `<div class="card"><h2>Budget du mois</h2>
-    ${barRow('Total', s.out, totalBudget)}
+    ${barRow('Total des catégories budgétées', budgetRows.reduce((x, [c]) => x + (s.byCat[c] || 0), 0), totalBudget)}
     ${budgetRows.map(([c, v]) => barRow(c, s.byCat[c] || 0, v)).join('')}</div>` : ''}
   <div class="card"><h2>Dépenses par catégorie</h2>
     ${cats.length ? cats.map(([c, v]) => `<div class="row"><span class="t">${esc(c)} <span class="tag">${Insights.natureOf(S, c) === 'besoin' ? 'obligatoire' : 'envie'}</span><div class="bar"><i style="width:${(v / s.out * 100).toFixed(1)}%"></i></div></span><span class="num">${fmt(v)}</span></div>`).join('') : '<p class="mut">Aucune dépense ce mois-ci. Importez vos relevés dans l’onglet Import.</p>'}
