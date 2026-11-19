@@ -8,7 +8,7 @@ const Insights = (() => {
     'Logement': 'besoin', 'Courses': 'besoin', 'Transport': 'besoin', 'Santé': 'besoin', 'Impôts': 'besoin',
     'Frais bancaires': 'besoin', 'Assurances': 'besoin', 'Téléphone & Internet': 'besoin',
     'Restaurants': 'envie', 'Loisirs': 'envie', 'Shopping': 'envie', 'Abonnements': 'envie', 'Voyages': 'envie',
-    'Cadeaux & dons': 'envie', 'Divers': 'envie', 'Frais de change': 'besoin'
+    'Cadeaux & dons': 'envie', 'Divers': 'envie', 'Frais de change': 'besoin', 'Crédit & prêts': 'besoin'
   };
   const clamp = (x, a = 0, b = 1) => Math.max(a, Math.min(b, x));
   const ym = d => Period.of(d); // mois budgétaire

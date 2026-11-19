@@ -6,10 +6,12 @@ const CATS = {
   'Logement': 'out', 'Courses': 'out', 'Restaurants': 'out', 'Transport': 'out', 'Abonnements': 'out',
   'Santé': 'out', 'Loisirs': 'out', 'Shopping': 'out', 'Impôts': 'out', 'Frais bancaires': 'out', 'Assurances': 'out', 'Téléphone & Internet': 'out',
   'Voyages': 'out', 'Cadeaux & dons': 'out', 'Divers': 'out',
-  'Frais de change': 'out',
+  'Frais de change': 'out', 'Crédit & prêts': 'out',
   'Épargne': 'move', 'Investissement': 'move', 'Virement interne': 'move', 'Change de devises': 'move'
 };
+// Règles par défaut : toujours appliquées APRÈS vos règles personnelles (S.rules), et mises à jour avec l'app.
 const DEFAULT_RULES = [
+  ['echeance pret|ech pret|ech. pret|pret immo|pret habitat|credit immo|remboursement pret|rembt pret|remb pret|mensualite pret|amortissement|cofidis|sofinco|cetelem|franfinance|credit conso', 'Crédit & prêts'],
   ['airbnb|booking.com|air france|easyjet|ryanair|transavia|vueling|hotel|abritel|expedia', 'Voyages'],
   ['uber eats|deliveroo|just eat|restaurant|mcdo|mc donald|burger king|kfc|brasserie|boulangerie|starbucks', 'Restaurants'],
   ['carrefour|leclerc|auchan|lidl|intermarche|monoprix|franprix|casino|super u|aldi|picard|grand frais|migros|coop |denner|lidl suisse|manor food', 'Courses'],
@@ -35,10 +37,20 @@ const DEFAULT_RULES = [
 
 const S = load();
 function load() {
-  try { const s = JSON.parse(localStorage.getItem(KEY)); if (s) return Object.assign(blank(), s); } catch (e) {}
+  try { const s = JSON.parse(localStorage.getItem(KEY)); if (s) { const b = blank(); delete b.rulesVersion; return Object.assign(b, s); } } catch (e) {}
   return blank();
 }
-function blank() { return { accounts: [], tx: [], rules: DEFAULT_RULES, budgets: {}, assets: [], snapshots: {}, settings: {} }; }
+function blank() { return { accounts: [], tx: [], rules: [], rulesVersion: 2, budgets: {}, assets: [], snapshots: {}, settings: {} }; }
+// Migration : les anciennes versions copiaient les règles par défaut dans vos données (elles ne se mettaient
+// donc jamais à jour). On ne garde que vos règles personnelles et on reclasse les opérations automatiques.
+function migrateRules() {
+  if ((S.rulesVersion || 1) >= 2) return false;
+  const defaults = new Set(DEFAULT_RULES.map(r => r.kw));
+  S.rules = (S.rules || []).filter(r => r.kw && !defaults.has(r.kw) && (r.kw.match(/\|/g) || []).length < 3);
+  S.rulesVersion = 2;
+  for (const t of S.tx) if (!t.manual) { delete t.paired; delete t.xpair; delete t.fx; t.cat = autoCat(t); }
+  return true;
+}
 function save() { try { localStorage.setItem(KEY, JSON.stringify(S)); } catch (e) { toast('Stockage plein ou indisponible'); } }
 
 // ---------- utilitaires ----------
@@ -56,7 +68,10 @@ function hash(t) { const s = Parsers.norm(t); let h = 0; for (const c of s) h = 
 
 function categorize(tx) {
   const l = ' ' + Parsers.norm(tx.label) + ' ';
-  for (const r of S.rules) if (r.kw.split('|').some(k => k && l.includes(Parsers.norm(k)))) return r.cat;
+  for (const r of S.rules.concat(DEFAULT_RULES)) {
+    if (CATS[r.cat] === 'in' && tx.amount < 0) continue; // un débit n'est jamais un revenu (ex. « remboursement prêt »)
+    if (r.kw.split('|').some(k => k && l.includes(Parsers.norm(k)))) return r.cat;
+  }
   return tx.amount > 0 ? 'Autres revenus' : 'Divers';
 }
 
@@ -220,6 +235,7 @@ function bilanCard() {
       <path d="${path}" fill="none" stroke="${ok ? 'var(--pos)' : 'var(--neg)'}" stroke-width="2" vector-effect="non-scaling-stroke"/></svg>
     <div class="mut" style="font-size:12px;display:flex;justify-content:space-between"><span>${f.from.split('-').reverse().join('/')}</span><span>cumul ${f.net >= 0 ? '+' : ''}${fmt(f.net)}</span><span>aujourd’hui</span></div>
     ${f.short ? '<p class="mut" style="font-size:12px;margin:6px 0 0">Historique court : le bilan sera plus fiable avec plusieurs mois de données.</p>' : ''}
+    <button class="btn sec sm" data-goto="check" style="margin-top:8px">🔍 Vérifier mes calculs</button>
     <p class="mut" style="font-size:12px;margin:6px 0 0">La courbe montre le solde cumulé (entrées − sorties) depuis le début de la période. Les virements entre vos comptes sont exclus, et le compte joint ne compte que pour votre part.</p>
   </div>`;
 }
@@ -272,6 +288,47 @@ views.profile = () => {
   ${rec.length ? `<div class="card"><h2>Dépenses récurrentes détectées</h2>${rec.map(r => `<div class="row"><span class="t">${esc(r.name)}<small>${esc(r.cat)} · ${r.kind === 'move' ? 'épargne' : Insights.natureOf(S, r.cat) === 'besoin' ? 'obligatoire' : 'envie'} · ${r.count} mois</small></span><span class="num">${fmt2(r.avg)}</span></div>`).join('')}
     <div class="row"><span class="t"><b>Total des dépenses fixes / mois</b></span><span class="num">${fmt(rec.filter(r => r.kind === 'out').reduce((x, r) => x + r.avg, 0))}</span></div></div>` : ''}`;
 };
+
+// ---------- Vérifier mes calculs : ce qui est compté, ce qui est exclu, ce qui est suspect ----------
+const SUSPECT_OUT = /\bvir\b|virement|transfert|telexoo|revolut|wise|swissquote|\bchange\b|devise/i;
+views.check = () => {
+  const txs = S.tx.filter(t => ym(t.date) === month).sort((a, b) => a.date.localeCompare(b.date));
+  const acc = id => S.accounts.find(a => a.id === id) || {};
+  const accLabel = a => `${a.name || '?'}${FX.accCur(a) !== FX.main() ? ' · ' + FX.accCur(a) : ''}${(a.share ?? 1) < 1 ? ' · part ' + Math.round(a.share * 100) + ' %' : ''}`;
+  const ins = txs.filter(t => kindOf(t.cat) === 'in'), outs = txs.filter(t => kindOf(t.cat) === 'out'), moves = txs.filter(t => kindOf(t.cat) === 'move');
+  const big = Math.max(300, 300 * FX.now('EUR'));
+  const suspects = [
+    ...outs.filter(t => t.amount < 0 && -txAmt(t) >= big && SUSPECT_OUT.test(t.label) && !t.manual).map(t => [t, 'Ressemble à un virement ou à un change, mais compté en dépense']),
+    ...ins.filter(t => t.cat !== 'Salaire' && txAmt(t) >= big && !t.manual).map(t => [t, 'Gros crédit compté comme revenu : est-ce un virement depuis un de vos comptes ?']),
+    ...(ins.filter(t => t.cat === 'Salaire').length > 1 ? ins.filter(t => t.cat === 'Salaire' && !t.manual).map(t => [t, 'Plusieurs « salaires » ce mois-ci : l’un d’eux est peut-être un change ou un virement']) : [])
+  ];
+  const sum = (l, f = txAmt) => l.reduce((x, t) => x + f(t), 0);
+  const fees = sum(moves, fxFee);
+  const line = (t, extra = '') => `<div class="row" data-tx="${t.id}"><span class="t" style="white-space:normal">${esc(t.label)}<small>${t.date.split('-').reverse().join('/')} · ${esc(accLabel(acc(t.acc)))} · <span class="tag">${esc(t.cat)}</span>${t.orig != null && t.cur !== FX.main() ? ` · ${fmtCur(t.orig, t.cur)}` : ''}</small>${extra}</span><span class="num ${t.amount > 0 ? 'pos' : ''}">${t.amount > 0 ? '+' : ''}${fmt2(kindOf(t.cat) === 'move' ? t.amount : txAmt(t))}</span></div>`;
+  const fixBtns = t => `<div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:6px">
+    <button class="btn sm" data-fix="${t.id}|Virement interne">Virement entre mes comptes</button>
+    <button class="btn sm" data-fix="${t.id}|Change de devises">Change de devises</button>
+    <button class="btn sec sm" data-fix="${t.id}|ok">C’est correct</button></div>`;
+  return `
+  <div class="card"><h2>Budget ${monthName(month)} ${Period.label(month)}</h2>
+    <div class="row"><span class="t">Entrées comptées<small>${ins.length} opération(s)</small></span><span class="num pos">${fmt(sum(ins))}</span></div>
+    <div class="row"><span class="t">Sorties comptées<small>${outs.length} opération(s)${fees ? ` + frais de change ${fmt2(fees)}` : ''}</small></span><span class="num neg">${fmt(-sum(outs) + fees)}</span></div>
+    <div class="row"><span class="t">Exclues du calcul<small>${moves.length} virement(s), change(s), épargne</small></span><span class="num mut">${moves.length}</span></div>
+    <p class="mut" style="font-size:12px;margin:6px 0 0">Les montants affichés sont ceux comptés pour vous (votre part sur le compte joint, convertis en ${FX.main()}). Touchez une opération pour la modifier.</p>
+    <button class="btn sec sm" id="copydiag" style="margin-top:8px">Copier le détail (pour me l’envoyer)</button></div>
+  ${suspects.length ? `<div class="card" style="border-color:var(--warn)"><h2>⚠️ À vérifier (${suspects.length})</h2>${suspects.map(([t, why]) => line(t, `<small style="color:var(--warn)">${why}</small>${fixBtns(t)}`)).join('')}</div>` : '<div class="card"><h2>✅ Rien de suspect repéré</h2></div>'}
+  <div class="card"><h2>Entrées comptées</h2>${ins.map(t => line(t)).join('') || '<p class="mut">Aucune.</p>'}</div>
+  <div class="card"><h2>Sorties comptées (plus grosses d’abord)</h2>${outs.slice().sort((a, b) => txAmt(a) - txAmt(b)).map(t => line(t)).join('') || '<p class="mut">Aucune.</p>'}</div>
+  <div class="card"><h2>Exclues : virements, changes, épargne</h2>${moves.map(t => line(t, t.fx ? `<small>change ${esc(t.fx.provider)} · frais ${fmt2(t.fx.cost)}</small>` : '')).join('') || '<p class="mut">Aucune.</p>'}</div>`;
+};
+function diagText() {
+  const acc = id => S.accounts.find(a => a.id === id) || {};
+  const lines = S.tx.filter(t => ym(t.date) === month).sort((a, b) => a.date.localeCompare(b.date)).map(t => {
+    const a = acc(t.acc);
+    return [t.date, `${FX.accCur(a)}${(a.share ?? 1) < 1 ? ' joint ' + Math.round(a.share * 100) + '%' : ''}`, t.label.slice(0, 40), (t.orig ?? t.amount).toFixed(2), t.cat, kindOf(t.cat), t.paired ? 'apparié' : ''].join(' | ');
+  });
+  return `Budget ${month} (${Period.label(month)}), paie le ${Period.payday()}\n` + lines.join('\n');
+}
 
 let txFilter = '';
 views.tx = () => {
@@ -326,7 +383,9 @@ views.settings = () => `
   <div class="card"><h2>Budgets mensuels par catégorie</h2>
     ${Object.keys(CATS).filter(c => CATS[c] === 'out').map(c => `<div class="row"><span class="t">${c}</span><input data-budget="${c}" type="number" inputmode="decimal" style="width:110px" value="${S.budgets[c] || ''}" placeholder="—"></div>`).join('')}</div>
   <div class="card"><h2>Règles de catégorisation</h2><p class="mut" style="font-size:13px">Mots-clés séparés par « | ». La première règle qui correspond gagne.</p>
+    ${S.rules.length ? '' : '<p class="mut" style="font-size:13px">Aucune règle personnelle pour l’instant (elles se créent aussi via « Toujours classer ainsi » sur une opération).</p>'}
     ${S.rules.map((r, i) => `<div class="grid2" style="margin-bottom:6px"><input data-rkw="${i}" value="${esc(r.kw)}"><div style="display:flex;gap:4px">${catSelect(r.cat, `data-rcat="${i}"`)}<button class="btn sec sm" data-rdel="${i}">✕</button></div></div>`).join('')}
+    <details style="margin:8px 0"><summary class="mut">${DEFAULT_RULES.length} règles par défaut (appliquées après les vôtres)</summary>${DEFAULT_RULES.map(r => `<div class="row"><span class="t" style="white-space:normal;font-size:13px">${esc(r.kw.replace(/\|/g, ', '))}</span><span class="tag">${esc(r.cat)}</span></div>`).join('')}</details>
     <button class="btn sec sm" id="addrule">+ Règle</button> <button class="btn sm" id="recat">Recatégoriser tout</button></div>
   <div class="card"><h2>Sécurité</h2><label>Code de verrouillage (laisser vide pour désactiver)</label>
     <div style="display:flex;gap:6px"><input id="newpin" type="password" inputmode="numeric" placeholder="${S.settings.pin ? 'Code actif' : 'Aucun code'}"><button class="btn sm" id="setpin">OK</button></div></div>
@@ -338,12 +397,12 @@ views.settings = () => `
 const catSelect = (v, attr = '') => `<select ${attr}>${Object.keys(CATS).map(c => `<option ${c === v ? 'selected' : ''}>${c}</option>`).join('')}</select>`;
 
 // ---------- rendu ----------
-const TITLES = { profile: 'Mon profil', dash: 'Budget', tx: 'Opérations', wealth: 'Patrimoine', import: 'Import', settings: 'Réglages' };
+const TITLES = { check: 'Vérifier mes calculs', profile: 'Mon profil', dash: 'Budget', tx: 'Opérations', wealth: 'Patrimoine', import: 'Import', settings: 'Réglages' };
 function render() {
   $('#title').textContent = TITLES[view];
   const ms = months(); if (!ms.includes(month)) month = ms[0];
   $('#month').innerHTML = ms.map(m => `<option value="${m}" ${m === month ? 'selected' : ''}>Budget ${monthName(m)}</option>`).join('');
-  $('#month').classList.toggle('hide', !['dash', 'tx'].includes(view));
+  $('#month').classList.toggle('hide', !['dash', 'tx', 'check'].includes(view));
   $('#view').innerHTML = views[view]();
   document.querySelectorAll('nav button').forEach(b => b.classList.toggle('on', b.dataset.v === view));
 }
@@ -408,6 +467,12 @@ function editTx(t) {
 $('#view').addEventListener('click', e => {
   const el = e.target.closest('[data-tx],[data-acc],[data-asset],[data-goto],button');
   if (!el || el.dataset.bank) return;
+  if (el.dataset.fix) {
+    const [id, cat] = el.dataset.fix.split('|'), t = S.tx.find(x => x.id === id);
+    if (t) { if (cat !== 'ok') t.cat = cat; t.manual = true; save(); render(); toast('Corrigé'); }
+    return;
+  }
+  if (el.id === 'copydiag') { navigator.clipboard.writeText(diagText()).then(() => toast('Détail copié'), () => toast('Copie impossible')); return; }
   if (el.dataset.bilan) { S.settings.bilanMonths = +el.dataset.bilan; save(); return render(); }
   if (el.dataset.goto) { view = el.dataset.goto; render(); return scrollTo(0, 0); }
   if (el.dataset.tx) return editTx(S.tx.find(t => t.id === el.dataset.tx));
@@ -516,7 +581,7 @@ async function checkLock() {
 
 if ('serviceWorker' in navigator && location.protocol !== 'file:') navigator.serviceWorker.register('sw.js').catch(() => {});
 if (navigator.storage && navigator.storage.persist) navigator.storage.persist();
-linkTransfers(); detectSalary(); save(); month = Period.current();
+migrateRules(); linkTransfers(); detectSalary(); save(); month = Period.current();
 checkLock(); snapshot(); render();
 FX.reconvert(); FX.refresh().then(ch => { if (ch) { linkTransfers(); save(); snapshot(); render(); } });
 Bank.handleRedirect().then(() => Bank.sync()).catch(() => {});
