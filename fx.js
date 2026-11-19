@@ -74,7 +74,7 @@ const FX = (() => {
   function salary(S, months) {
     const set = new Set(months), m = main(), by = {};
     for (const t of S.tx) {
-      if (t.cat !== 'Salaire' || !set.has(t.date.slice(0, 7)) || (t.cur || m) === m) continue;
+      if (t.cat !== 'Salaire' || !set.has(Period.of(t.date)) || (t.cur || m) === m) continue;
       const share = (S.accounts.find(a => a.id === t.acc) || {}).share ?? 1;
       const b = by[t.cur] = by[t.cur] || { orig: 0, conv: 0 };
       b.orig += t.orig * share; b.conv += t.amount * share;

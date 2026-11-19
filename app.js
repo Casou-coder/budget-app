@@ -46,7 +46,7 @@ const fmt = (n, d = 0) => (n || 0).toLocaleString('fr-FR', { style: 'currency', 
 const fmtCur = (n, cur) => (n || 0).toLocaleString('fr-FR', { style: 'currency', currency: cur, maximumFractionDigits: 0 });
 const fmt2 = n => fmt(n, 2);
 const uid = () => Math.random().toString(36).slice(2, 10) + Date.now().toString(36);
-const ym = d => d.slice(0, 7);
+const ym = d => Period.of(d); // mois budgétaire (d'une paie à l'autre)
 const monthName = m => new Date(m + '-01T12:00').toLocaleDateString('fr-FR', { month: 'long', year: 'numeric' });
 const kindOf = c => CATS[c] || 'out';
 function toast(msg) { const t = document.createElement('div'); t.className = 'toast'; t.textContent = msg; document.body.append(t); setTimeout(() => t.remove(), 2500); }
@@ -80,6 +80,17 @@ function linkTransfers() {
   }
 }
 
+// Détecte le salaire même si le libellé est inconnu : même émetteur, chaque mois, montant important
+function detectSalary() {
+  const groups = {};
+  for (const t of S.tx) if (t.amount > 0 && t.cat === 'Autres revenus' && !t.manual) (groups[Insights.merchant(t.label)] = groups[Insights.merchant(t.label)] || []).push(t);
+  const minAmt = 800 * FX.now('EUR'); // ~800 € dans la devise principale
+  for (const list of Object.values(groups)) {
+    const big = list.filter(t => t.amount >= minAmt);
+    if (new Set(big.map(t => t.date.slice(0, 7))).size >= 2) big.forEach(t => { t.cat = 'Salaire'; });
+  }
+}
+
 function monthStats(m) {
   const res = { in: 0, out: 0, move: 0, byCat: {} };
   const invest = new Set(S.accounts.filter(a => a.type === 'invest' || a.type === 'epargne').map(a => a.id));
@@ -104,7 +115,7 @@ function wealth() {
 }
 function months() {
   const set = new Set(S.tx.map(t => ym(t.date)));
-  set.add(new Date().toISOString().slice(0, 7));
+  set.add(Period.current());
   return [...set].sort().reverse();
 }
 function snapshot() {
@@ -114,7 +125,7 @@ function snapshot() {
 }
 
 // ---------- vues ----------
-let view = 'dash', month = new Date().toISOString().slice(0, 7);
+let view = 'dash', month = Period.current();
 const views = {};
 
 views.dash = () => {
@@ -125,10 +136,11 @@ views.dash = () => {
   const cats = Object.entries(s.byCat).sort((a, b) => b[1] - a[1]);
   const budgetRows = Object.entries(S.budgets).filter(([, v]) => v > 0);
   const totalBudget = budgetRows.reduce((a, [, v]) => a + v, 0);
-  const isCur = month === new Date().toISOString().slice(0, 7), d = Insights.daily(S, kindOf);
+  const isCur = month === Period.current(), d = Insights.daily(S, kindOf);
   const nat = Object.entries(s.byCat).reduce((o, [c, v]) => (o[Insights.natureOf(S, c)] += v, o), { besoin: 0, envie: 0 });
   const p = Insights.profile(S, kindOf);
   return `
+  ${Period.label(month) ? `<div class="mut" style="font-size:13px;margin:2px 2px 0">Mois budgétaire ${Period.label(month)} · paie le ${Period.payday()}</div>` : ''}
   ${isCur && d.income > 0 ? `<div class="card" style="border-color:var(--acc)">
     <h2>Aujourd’hui, vous pouvez dépenser</h2>
     <div style="font-size:34px;font-weight:800"><span class="${d.remaining > 0 && d.leftToday > 0 ? 'pos' : 'neg'}">${fmt(Math.max(0, d.leftToday))}</span></div>
@@ -242,6 +254,7 @@ views.settings = () => `
     <div class="row"><span class="t">Je travaille en Suisse (frontalier)</span><select id="front" style="width:110px"><option value="">Non</option><option value="CH" ${S.settings.frontalier ? 'selected' : ''}>Oui</option></select></div>
     ${S.settings.frontalier ? `<div class="row"><span class="t">Canton de travail</span><select id="canton" style="width:150px">${[['', 'Je ne sais pas'], ['GE', 'Genève'], ['accord', 'Autre (VD, VS, NE, JU, BE, BS, BL, SO)'], ['autre', 'Autre canton']].map(([v, l]) => `<option value="${v}" ${(S.settings.canton || '') === v ? 'selected' : ''}>${l}</option>`).join('')}</select></div>` : ''}
     <p class="mut" style="font-size:12px">Les opérations en devise étrangère sont converties au taux BCE du jour de l’opération.</p></div>
+  <div class="card"><h2>Jour de paie</h2><div class="row"><span class="t">Le mois budgétaire va d’une paie à la suivante<small>Détecté : le ${Period.detect()} · laissez vide pour la détection automatique · 1 = mois calendaire</small></span><input id="payday" type="number" min="1" max="31" inputmode="numeric" style="width:80px" value="${S.settings.payday || ''}" placeholder="${Period.detect()}"></div></div>
   <div class="card"><h2>Objectif d’épargne</h2><div class="row"><span class="t">Part des revenus à mettre de côté</span><input id="savtarget" type="number" inputmode="numeric" style="width:90px" value="${S.settings.savingsTarget ?? 20}"> %</div></div>
   <div class="card"><h2>Obligatoire ou envie ?</h2><p class="mut" style="font-size:13px">Sert au profil, au reste à dépenser du jour et aux priorités.</p>
     ${Object.keys(CATS).filter(c => CATS[c] === 'out').map(c => `<div class="row"><span class="t">${c}</span><select data-nature="${c}" style="width:140px"><option value="besoin" ${Insights.natureOf(S, c) === 'besoin' ? 'selected' : ''}>Obligatoire</option><option value="envie" ${Insights.natureOf(S, c) === 'envie' ? 'selected' : ''}>Envie</option></select></div>`).join('')}</div>
@@ -264,7 +277,7 @@ const TITLES = { profile: 'Mon profil', dash: 'Budget', tx: 'Opérations', wealt
 function render() {
   $('#title').textContent = TITLES[view];
   const ms = months(); if (!ms.includes(month)) month = ms[0];
-  $('#month').innerHTML = ms.map(m => `<option value="${m}" ${m === month ? 'selected' : ''}>${monthName(m)}</option>`).join('');
+  $('#month').innerHTML = ms.map(m => `<option value="${m}" ${m === month ? 'selected' : ''}>Budget ${monthName(m)}</option>`).join('');
   $('#month').classList.toggle('hide', !['dash', 'tx'].includes(view));
   $('#view').innerHTML = views[view]();
   document.querySelectorAll('nav button').forEach(b => b.classList.toggle('on', b.dataset.v === view));
@@ -350,6 +363,7 @@ $('#view').addEventListener('change', async e => {
   if (el.id === 'maincur') { S.settings.currency = el.value; save(); toast('Conversion en cours…'); await FX.refresh(true); FX.reconvert(); save(); snapshot(); render(); }
   if (el.id === 'front') { S.settings.frontalier = !!el.value; save(); render(); }
   if (el.id === 'canton') { S.settings.canton = el.value; save(); }
+  if (el.id === 'payday') { const v = parseInt(el.value); S.settings.payday = v >= 1 && v <= 31 ? v : null; month = Period.current(); save(); render(); }
   if (el.id === 'savtarget') { S.settings.savingsTarget = Math.max(0, Math.min(90, parseFloat(el.value) || 0)); save(); }
   if (el.dataset.nature) { (S.settings.nature = S.settings.nature || {})[el.dataset.nature] = el.value; save(); }
   if (el.dataset.budget) { S.budgets[el.dataset.budget] = parseFloat(el.value) || 0; save(); }
@@ -397,7 +411,7 @@ function ingest(acc, r) {
     if ((acc.share ?? 1) < 1 && tx.cat === 'Autres revenus') tx.cat = 'Virement interne';
     S.tx.push(tx); added++;
   }
-  if (added) linkTransfers();
+  if (added) { linkTransfers(); detectSalary(); }
   if (r.balance && !isNaN(r.balance.value) && (!acc.balanceDate || r.balance.date >= acc.balanceDate)) { acc.balance = r.balance.value; acc.balanceDate = r.balance.date; }
   return { added, dup };
 }
@@ -436,6 +450,7 @@ async function checkLock() {
 
 if ('serviceWorker' in navigator && location.protocol !== 'file:') navigator.serviceWorker.register('sw.js').catch(() => {});
 if (navigator.storage && navigator.storage.persist) navigator.storage.persist();
+detectSalary(); linkTransfers(); save(); month = Period.current();
 checkLock(); snapshot(); render();
 FX.reconvert(); FX.refresh().then(ch => { if (ch) { linkTransfers(); save(); snapshot(); render(); } });
 Bank.handleRedirect().then(() => Bank.sync()).catch(() => {});

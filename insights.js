@@ -11,14 +11,14 @@ const Insights = (() => {
     'Cadeaux & dons': 'envie', 'Divers': 'envie'
   };
   const clamp = (x, a = 0, b = 1) => Math.max(a, Math.min(b, x));
-  const ym = d => d.slice(0, 7);
+  const ym = d => Period.of(d); // mois budgétaire
   const today = () => new Date().toISOString().slice(0, 10);
 
   function natureOf(S, cat) { return (S.settings.nature || {})[cat] || NATURE[cat] || 'envie'; }
 
   // Mois complets les plus récents ayant des opérations (hors mois en cours), max n
   function refMonths(S, n = 3) {
-    const cur = today().slice(0, 7);
+    const cur = Period.current();
     const ms = [...new Set(S.tx.map(t => ym(t.date)))].filter(m => m < cur).sort().reverse().slice(0, n);
     return ms.length ? ms : [cur];
   }
@@ -110,7 +110,7 @@ const Insights = (() => {
   // ---------- reste à dépenser aujourd'hui ----------
   function daily(S, kindOf) {
     const ref = aggregate(S, kindOf, refMonths(S, 3));
-    const curM = today().slice(0, 7), cur = aggregate(S, kindOf, [curM]);
+    const curM = Period.current(), cur = aggregate(S, kindOf, [curM]);
     let income = Math.max(ref.income, cur.income);
     // Salaire en devise étrangère : on budgète au taux le plus bas des 90 derniers jours (prudence)
     const f = FX.salary(S, refMonths(S, 3));
@@ -119,8 +119,7 @@ const Insights = (() => {
     const besoins = Math.max(ref.besoin, cur.besoin);       // obligations attendues sur le mois
     const envelope = income * (1 - target) - besoins;       // ce qu'on peut consacrer aux envies
     const remaining = envelope - cur.envie;
-    const d = new Date(), last = new Date(d.getFullYear(), d.getMonth() + 1, 0).getDate();
-    const daysLeft = last - d.getDate() + 1;
+    const daysLeft = Period.daysLeft(); // jusqu'à la prochaine paie
     const spentToday = -S.tx.filter(t => t.date === today() && kindOf(t.cat) === 'out' && natureOf(S, t.cat) === 'envie').reduce((x, t) => x + t.amount, 0);
     const perDay = remaining > 0 ? (remaining + spentToday) / daysLeft : 0;
     return { income, target, besoins, envelope, spent: cur.envie, remaining, daysLeft, perDay, spentToday, leftToday: perDay - spentToday };
