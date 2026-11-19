@@ -30,9 +30,10 @@ const Insights = (() => {
     for (const t of S.tx) {
       if (!set.has(ym(t.date))) continue;
       const k = kindOf(t.cat);
-      if (k === 'in') { r.income += t.amount; continue; }
-      if (k === 'move') { if (t.cat !== 'Virement interne' && !invest.has(t.acc)) r.placed -= t.amount; continue; }
-      const v = -t.amount; // dépense positive (remboursement = négatif)
+      const amt = txAmt(t); // en euros, pondéré par la part du compte (compte joint)
+      if (k === 'in') { r.income += amt; continue; }
+      if (k === 'move') { if (t.cat !== 'Virement interne' && !invest.has(t.acc)) r.placed -= amt; continue; }
+      const v = -amt; // dépense positive (remboursement = négatif)
       r[natureOf(S, t.cat)] += v; r.out += v;
       r.byCat[t.cat] = (r.byCat[t.cat] || 0) + v;
       if (v > 0 && v < 20) { r.small++; r.smallSum += v; }
@@ -110,7 +111,10 @@ const Insights = (() => {
   function daily(S, kindOf) {
     const ref = aggregate(S, kindOf, refMonths(S, 3));
     const curM = today().slice(0, 7), cur = aggregate(S, kindOf, [curM]);
-    const income = Math.max(ref.income, cur.income);
+    let income = Math.max(ref.income, cur.income);
+    // Salaire en devise étrangère : on budgète au taux le plus bas des 90 derniers jours (prudence)
+    const f = FX.salary(S, refMonths(S, 3));
+    if (f && f.prudent < f.conv) income -= (f.conv - f.prudent);
     const target = (S.settings.savingsTarget ?? 20) / 100;
     const besoins = Math.max(ref.besoin, cur.besoin);       // obligations attendues sur le mois
     const envelope = income * (1 - target) - besoins;       // ce qu'on peut consacrer aux envies
@@ -173,6 +177,16 @@ const Insights = (() => {
     if (p.n > 0.5) t.push(`Vos obligations représentent ${pct(p.n)} des revenus (repère : 50 %). Renégociez assurances, énergie et forfaits.`);
     if (p.key === 'conservateur' || p.traits.some(x => x[0].includes('dormante'))) t.push('Une fois 3 à 6 mois de dépenses de côté (épargne de précaution), placez le surplus (PEA, assurance vie, ETF) plutôt que de le laisser dormir.');
     if (p.s > 0 && p.s < 0.2) t.push(`Programmez un virement automatique de ${fmt(Math.ceil(a.income * 0.1 / 10) * 10)} le jour de la paie : on épargne d’abord, on dépense ensuite.`);
+    const f = FX.salary(S, p.months);
+    if (f || S.settings.frontalier) {
+      if (f) t.push(`Salaire en ${f.cur} : votre budget est calculé au taux prudent (${f.min.toLocaleString('fr-FR', { minimumFractionDigits: 4, maximumFractionDigits: 4 })}). Si le taux remonte, la différence (${fmt(Math.max(0, f.atNow - f.prudent))} ce mois-ci) part directement en épargne.`);
+      t.push(`Convertissez vos ${f ? f.cur : 'CHF'} via un service de change à faible marge plutôt que par la conversion de la banque (souvent 1 à 2 % de frais cachés), et à date fixe chaque mois pour lisser le taux.`);
+      const c = S.settings.canton;
+      if (c === 'GE') t.push('Genève : votre salaire est imposé à la source en Suisse. Vérifiez chaque année si le statut de quasi-résident est plus avantageux.');
+      else if (c === 'accord' || c === 'autre') t.push('Hors Genève, votre salaire est en principe imposé en France : l’impôt est prélevé par acomptes sur votre compte français. Vérifiez qu’ils sont bien classés en « Impôts » pour que votre budget soit juste.');
+      else t.push('Indiquez votre canton de travail dans Réglages : selon le canton, l’impôt est prélevé en Suisse (Genève) ou en France (acomptes à prévoir).');
+      t.push('Assurance maladie frontalier (CNTFS ou LAMal) : vérifiez qu’elle apparaît en « Assurances » ou « Santé », c’est une dépense obligatoire importante.');
+    }
     if (p.key === 'epargnant' || p.key === 'equilibre') t.push('Votre gestion est saine : gardez le cap et vérifiez vos budgets une fois par semaine.');
     return t;
   }
@@ -186,7 +200,7 @@ const Insights = (() => {
     return out;
   }
 
-  const fmt = n => (n || 0).toLocaleString('fr-FR', { style: 'currency', currency: 'EUR', maximumFractionDigits: 0 });
+  const fmt = n => (n || 0).toLocaleString('fr-FR', { style: 'currency', currency: S.settings.currency || 'EUR', maximumFractionDigits: 0 });
   const pct = x => Math.round(x * 100) + ' %';
   return { NATURE, natureOf, profile, daily, priorities, recurring, tips, suggestedBudgets, aggregate, refMonths, merchant, pct };
 })();

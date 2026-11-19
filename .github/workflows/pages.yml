@@ -23,7 +23,7 @@ jobs:
       - name: Préparer le site (sans les exemples ni les outils)
         run: |
           mkdir _site
-          cp index.html app.js parsers.js insights.js bank.js sw.js manifest.webmanifest icon.svg icon-180.png icon-512.png privacy.html terms.html _site/
+          cp index.html app.js parsers.js insights.js fx.js bank.js sw.js manifest.webmanifest icon.svg icon-180.png icon-512.png privacy.html terms.html _site/
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
       - id: deployment

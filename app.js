@@ -11,7 +11,7 @@ const CATS = {
 const DEFAULT_RULES = [
   ['airbnb|booking.com|air france|easyjet|ryanair|transavia|vueling|hotel|abritel|expedia', 'Voyages'],
   ['uber eats|deliveroo|just eat|restaurant|mcdo|mc donald|burger king|kfc|brasserie|boulangerie|starbucks', 'Restaurants'],
-  ['carrefour|leclerc|auchan|lidl|intermarche|monoprix|franprix|casino|super u|aldi|picard|grand frais', 'Courses'],
+  ['carrefour|leclerc|auchan|lidl|intermarche|monoprix|franprix|casino|super u|aldi|picard|grand frais|migros|coop |denner|lidl suisse|manor food', 'Courses'],
   ['sncf|ratp|navigo|uber|bolt|blablacar|total|esso|shell|bp |peage|autoroute|parking|essence', 'Transport'],
   ['free mobile|freebox|orange|sfr|bouygues|sosh|red by|b&you|livebox', 'Téléphone & Internet'],
   ['netflix|spotify|deezer|disney|canal|amazon prime|icloud|google storage|apple.com|youtube|chatgpt|openai|audible', 'Abonnements'],
@@ -21,10 +21,11 @@ const DEFAULT_RULES = [
   ['frais|cotisation|commission|agios', 'Frais bancaires'],
   ['fnac|amazon|zara|h&m|decathlon|ikea|leroy merlin|cdiscount|vinted', 'Shopping'],
   ['cinema|ugc|pathe|steam|playstation|fitness|basic fit|concert|ticketmaster', 'Loisirs'],
-  ['salaire|paie|payfit|remuneration', 'Salaire'],
+  ['salaire|paie|payfit|remuneration|lohn|gehalt|salary|traitement', 'Salaire'],
   ['interest|zinsen|interets|dividend|dividende|caf |remboursement', 'Autres revenus'],
   ['buy|kauf|achat titre|sell|verkauf|vente titre|savings plan|sparplan|plan d.investissement', 'Investissement'],
   ['trade republic|livret|ldd|lep |pel |assurance vie', 'Épargne'],
+  ['cntfs|lamal|cpam frontalier|cmu frontalier|groupe mutuel|helsana|css assurance|swica|assura', 'Assurances'],
   ['assurance|axa|maif|macif|matmut|allianz|generali|groupama|alan ', 'Assurances'],
   ['don |dons |croix rouge|unicef|leetchi|lydia cagnotte|cadeau', 'Cadeaux & dons'],
   ['deposit|einzahlung|removal|auszahlung|vir interne|virement interne|vir de m|vir sepa m', 'Virement interne']
@@ -41,7 +42,8 @@ function save() { try { localStorage.setItem(KEY, JSON.stringify(S)); } catch (e
 // ---------- utilitaires ----------
 const $ = s => document.querySelector(s);
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-const fmt = (n, d = 0) => (n || 0).toLocaleString('fr-FR', { style: 'currency', currency: 'EUR', maximumFractionDigits: d, minimumFractionDigits: d });
+const fmt = (n, d = 0) => (n || 0).toLocaleString('fr-FR', { style: 'currency', currency: S.settings.currency || 'EUR', maximumFractionDigits: d, minimumFractionDigits: d });
+const fmtCur = (n, cur) => (n || 0).toLocaleString('fr-FR', { style: 'currency', currency: cur, maximumFractionDigits: 0 });
 const fmt2 = n => fmt(n, 2);
 const uid = () => Math.random().toString(36).slice(2, 10) + Date.now().toString(36);
 const ym = d => d.slice(0, 7);
@@ -57,21 +59,43 @@ function categorize(tx) {
 }
 
 // ---------- calculs ----------
+// ---------- devises et comptes joints ----------
+// Les opérations sont converties en euros à l'import (montant d'origine gardé dans t.orig).
+// Un compte joint compte pour la part de l'utilisateur (ex. 50 %) dans le budget et le patrimoine.
+function shareOf(accId) { const a = S.accounts.find(x => x.id === accId); return a && a.share != null ? a.share : 1; }
+function txAmt(t) { return t.amount * shareOf(t.acc); }
+// Repère les virements entre vos propres comptes (même montant, signe opposé, à 4 jours près)
+function linkTransfers() {
+  const list = S.tx.filter(t => !t.manual).sort((a, b) => a.date.localeCompare(b.date));
+  const used = new Set(S.tx.filter(t => t.paired).map(t => t.id));
+  for (const d of list) {
+    if (d.amount >= 0 || used.has(d.id)) continue;
+    const t0 = new Date(d.date).getTime();
+    const c = list.find(x => {
+      if (used.has(x.id) || x.acc === d.acc || x.amount <= 0 || Math.abs(new Date(x.date).getTime() - t0) > 5 * 864e5) return false;
+      if ((x.cur || 'EUR') === (d.cur || 'EUR')) return Math.abs(x.orig + d.orig) < 0.01;
+      return Math.abs(x.amount + d.amount) <= Math.abs(d.amount) * 0.03; // change de devise : frais et écart de taux
+    });
+    if (c) { d.cat = c.cat = 'Virement interne'; d.paired = c.paired = true; used.add(d.id); used.add(c.id); }
+  }
+}
+
 function monthStats(m) {
   const res = { in: 0, out: 0, move: 0, byCat: {} };
   const invest = new Set(S.accounts.filter(a => a.type === 'invest' || a.type === 'epargne').map(a => a.id));
   for (const t of S.tx) {
     if (ym(t.date) !== m) continue;
     const k = kindOf(t.cat);
-    if (k === 'in') res.in += t.amount;
-    else if (k === 'out') { res.out -= t.amount; res.byCat[t.cat] = (res.byCat[t.cat] || 0) - t.amount; }
-    else if (t.cat !== 'Virement interne' && !invest.has(t.acc)) res.move -= t.amount; // argent sorti vers épargne/placements
+    const v = txAmt(t);
+    if (k === 'in') res.in += v;
+    else if (k === 'out') { res.out -= v; res.byCat[t.cat] = (res.byCat[t.cat] || 0) - v; }
+    else if (t.cat !== 'Virement interne' && !invest.has(t.acc)) res.move -= v; // argent sorti vers épargne/placements
   }
   res.net = res.in - res.out;
   res.rate = res.in > 0 ? res.net / res.in : 0;
   return res;
 }
-function accountValue(a) { return (a.balance || 0) + (a.positions || []).reduce((s, p) => s + (p.value || 0), 0); }
+function accountValue(a) { return ((a.balance || 0) * FX.now(FX.accCur(a)) + (a.positions || []).reduce((s, p) => s + (p.value || 0), 0) * FX.now('EUR')) * (a.share ?? 1); }
 function wealth() {
   const by = { courant: 0, epargne: 0, invest: 0, autre: 0 };
   for (const a of S.accounts) by[a.type || 'autre'] += accountValue(a);
@@ -111,6 +135,12 @@ views.dash = () => {
     <div class="mut" style="font-size:13px">${d.remaining > 0 ? `${fmt(d.remaining)} d’envies restantes sur ${d.daysLeft} jour(s) · obligations prévues ${fmt(d.besoins)} · épargne visée ${Math.round(d.target * 100)} %` : `Enveloppe « envies » du mois dépassée de ${fmt(-d.remaining)}. Limitez-vous aux dépenses obligatoires.`}</div>
     <div class="bar"><i class="${d.remaining < 0 ? 'over' : ''}" style="width:${Math.min(100, d.envelope > 0 ? d.spent / d.envelope * 100 : 100).toFixed(1)}%"></i></div>
   </div>` : ''}
+  ${(() => { const f = FX.salary(S, Insights.refMonths(S, 3)); if (!f) return '';
+    return `<div class="card"><h2>💱 Salaire en ${f.cur}</h2>
+      <div class="row"><span class="t">Salaire moyen<small>${fmtCur(f.orig, f.cur)} par mois</small></span><span class="num">${fmt(f.atNow)}</span></div>
+      <div class="row"><span class="t">Taux du jour<small>90 j : min ${f.min.toLocaleString('fr-FR', { minimumFractionDigits: 4, maximumFractionDigits: 4 })} · max ${f.max.toLocaleString('fr-FR', { minimumFractionDigits: 4, maximumFractionDigits: 4 })}</small></span><span class="num">1 ${f.cur} = ${f.rate.toLocaleString('fr-FR', { minimumFractionDigits: 4, maximumFractionDigits: 4 })} ${FX.main()}</span></div>
+      <div class="row"><span class="t">Budget calculé au taux prudent<small>le plus bas des 90 derniers jours</small></span><span class="num">${fmt(f.prudent)}</span></div>
+      <p class="mut" style="font-size:13px;margin:6px 0 0">1 centime de variation du taux = ${fmt(f.perCent)} par mois sur votre salaire.</p></div>`; })()}
   ${p.score != null ? `<div class="card" data-goto="profile" style="display:flex;align-items:center;gap:12px"><span style="font-size:34px">${p.e}</span><div style="flex:1"><b>${p.name}</b><div class="mut" style="font-size:13px">Score de santé financière ${p.score}/100 · voir l’analyse ›</div></div></div>` : ''}
   <div class="kpis">
     <div class="kpi big"><div class="l">Reste à vivre / épargne du mois</div><div class="v ${s.net >= 0 ? 'pos' : 'neg'}">${fmt(s.net)}</div>
@@ -172,7 +202,7 @@ views.tx = () => {
   const list = S.tx.filter(t => ym(t.date) === month && (!q || Parsers.norm(t.label + ' ' + t.cat).includes(q))).sort((a, b) => b.date.localeCompare(a.date));
   const acc = id => (S.accounts.find(a => a.id === id) || {}).name || '';
   return `<input id="q" placeholder="Rechercher (libellé, catégorie)…" value="${esc(txFilter)}">
-  <div class="card">${list.length ? list.map(t => `<div class="row" data-tx="${t.id}"><span class="t">${esc(t.label)}<small>${t.date.split('-').reverse().join('/')} · ${esc(acc(t.acc))} · <span class="tag">${esc(t.cat)}</span></small></span><span class="num ${t.amount > 0 ? 'pos' : ''}">${t.amount > 0 ? '+' : ''}${fmt2(t.amount)}</span></div>`).join('') : '<p class="mut">Aucune opération pour ce mois.</p>'}</div>
+  <div class="card">${list.length ? list.map(t => `<div class="row" data-tx="${t.id}"><span class="t">${esc(t.label)}<small>${t.date.split('-').reverse().join('/')} · ${esc(acc(t.acc))} · <span class="tag">${esc(t.cat)}</span></small></span><span class="num ${t.amount > 0 ? 'pos' : ''}">${t.amount > 0 ? '+' : ''}${fmt2(t.amount)}${t.orig != null && t.cur !== FX.main() ? `<small>${t.orig.toLocaleString('fr-FR', { minimumFractionDigits: 2 })} ${t.cur}</small>` : ''}${shareOf(t.acc) < 1 ? `<small>ma part ${Math.round(shareOf(t.acc) * 100)} %</small>` : ''}</span></div>`).join('') : '<p class="mut">Aucune opération pour ce mois.</p>'}</div>
   <button class="btn sec" id="addtx">+ Ajouter une opération manuelle</button>`;
 };
 
@@ -182,7 +212,7 @@ views.wealth = () => {
   const max = Math.max(1, ...snaps.map(([, v]) => v));
   const label = { courant: 'Compte courant', epargne: 'Épargne', invest: 'Placements', autre: 'Autre' };
   return `<div class="kpi big"><div class="l">Patrimoine total</div><div class="v">${fmt(w.total)}</div></div>
-  <div class="card"><h2>Comptes</h2>${S.accounts.length ? S.accounts.map(a => `<div class="row" data-acc="${a.id}"><span class="t">${esc(a.name)}<small>${esc(a.inst || '')} · ${label[a.type]}${(a.positions || []).length ? ` · ${a.positions.length} positions` : ''}${a.balanceDate ? ' · au ' + a.balanceDate.split('-').reverse().join('/') : ''}</small></span><span class="num">${fmt2(accountValue(a))}</span></div>`).join('') : '<p class="mut">Aucun compte. Ajoutez vos comptes CIC et Trade Republic.</p>'}
+  <div class="card"><h2>Comptes</h2>${S.accounts.length ? S.accounts.map(a => `<div class="row" data-acc="${a.id}"><span class="t">${esc(a.name)}<small>${esc(a.inst || '')} · ${label[a.type]}${(a.positions || []).length ? ` · ${a.positions.length} positions` : ''}${FX.accCur(a) !== FX.main() ? ` · ${(a.balance || 0).toLocaleString('fr-FR', { style: 'currency', currency: FX.accCur(a) })}` : ''}${(a.share ?? 1) < 1 ? ` · ma part ${Math.round(a.share * 100)} %` : ''}${a.balanceDate ? ' · au ' + a.balanceDate.split('-').reverse().join('/') : ''}</small></span><span class="num">${fmt2(accountValue(a))}</span></div>`).join('') : '<p class="mut">Aucun compte. Ajoutez vos comptes CIC et Trade Republic.</p>'}
     <button class="btn sec sm" id="addacc">+ Compte</button></div>
   <div class="card"><h2>Autres actifs (immobilier, crypto, véhicule…)</h2>${S.assets.map(x => `<div class="row" data-asset="${x.id}"><span class="t">${esc(x.name)}</span><span class="num">${fmt(x.value)}</span></div>`).join('') || '<p class="mut">Aucun.</p>'}
     <button class="btn sec sm" id="addasset">+ Actif</button></div>
@@ -207,6 +237,11 @@ views.import = () => `${Bank.card()}
     <li>Sans pytr : saisissez la valeur du portefeuille à la main dans Patrimoine.</li></ol></div>`;
 
 views.settings = () => `
+  <div class="card"><h2>Devise et situation</h2>
+    <div class="row"><span class="t">Devise principale (budget de vie)</span><select id="maincur" style="width:110px">${['EUR', 'CHF'].map(c => `<option ${FX.main() === c ? 'selected' : ''}>${c}</option>`).join('')}</select></div>
+    <div class="row"><span class="t">Je travaille en Suisse (frontalier)</span><select id="front" style="width:110px"><option value="">Non</option><option value="CH" ${S.settings.frontalier ? 'selected' : ''}>Oui</option></select></div>
+    ${S.settings.frontalier ? `<div class="row"><span class="t">Canton de travail</span><select id="canton" style="width:150px">${[['', 'Je ne sais pas'], ['GE', 'Genève'], ['accord', 'Autre (VD, VS, NE, JU, BE, BS, BL, SO)'], ['autre', 'Autre canton']].map(([v, l]) => `<option value="${v}" ${(S.settings.canton || '') === v ? 'selected' : ''}>${l}</option>`).join('')}</select></div>` : ''}
+    <p class="mut" style="font-size:12px">Les opérations en devise étrangère sont converties au taux BCE du jour de l’opération.</p></div>
   <div class="card"><h2>Objectif d’épargne</h2><div class="row"><span class="t">Part des revenus à mettre de côté</span><input id="savtarget" type="number" inputmode="numeric" style="width:90px" value="${S.settings.savingsTarget ?? 20}"> %</div></div>
   <div class="card"><h2>Obligatoire ou envie ?</h2><p class="mut" style="font-size:13px">Sert au profil, au reste à dépenser du jour et aux priorités.</p>
     ${Object.keys(CATS).filter(c => CATS[c] === 'out').map(c => `<div class="row"><span class="t">${c}</span><select data-nature="${c}" style="width:140px"><option value="besoin" ${Insights.natureOf(S, c) === 'besoin' ? 'selected' : ''}>Obligatoire</option><option value="envie" ${Insights.natureOf(S, c) === 'envie' ? 'selected' : ''}>Envie</option></select></div>`).join('')}</div>
@@ -250,14 +285,17 @@ function editAccount(a) {
     <label>Nom</label><input name="name" required value="${esc(a.name)}" placeholder="CIC Compte courant">
     <div class="grid2"><div><label>Établissement</label><input name="inst" value="${esc(a.inst)}" placeholder="CIC"></div>
     <div><label>Type</label><select name="type">${[['courant', 'Courant'], ['epargne', 'Épargne'], ['invest', 'Placements'], ['autre', 'Autre']].map(([v, l]) => `<option value="${v}" ${a.type === v ? 'selected' : ''}>${l}</option>`).join('')}</select></div></div>
-    <label>Solde espèces actuel (€)</label><input name="balance" type="number" step="0.01" inputmode="decimal" value="${a.balance || 0}">
+    <div class="grid2"><div><label>Solde espèces actuel</label><input name="balance" type="number" step="0.01" inputmode="decimal" value="${a.balance || 0}"></div>
+    <div><label>Devise</label><select name="currency">${['EUR', 'CHF', 'USD', 'GBP'].map(c => `<option ${(a.currency || 'EUR') === c ? 'selected' : ''}>${c}</option>`).join('')}</select></div></div>
+    <label>Ma part de ce compte (%) — 50 pour un compte joint à deux</label><input name="share" type="number" min="0" max="100" inputmode="numeric" value="${Math.round((a.share ?? 1) * 100)}">
     ${(a.positions || []).length ? `<label>Positions (${fmt2(a.positions.reduce((s, p) => s + p.value, 0))})</label><div style="max-height:150px;overflow:auto">${a.positions.map(p => `<div class="row"><span class="t">${esc(p.name)}</span><span class="num">${fmt2(p.value)}</span></div>`).join('')}</div>` : ''}
     ${isNew ? '' : '<label><input type="checkbox" name="del" style="width:auto"> Supprimer ce compte et ses opérations</label>'}`,
   f => {
     if (f.del) { S.accounts = S.accounts.filter(x => x.id !== a.id); S.tx = S.tx.filter(t => t.acc !== a.id); return; }
     const nb = parseFloat(f.balance) || 0;
     if (nb !== a.balance) a.balanceDate = new Date().toISOString().slice(0, 10);
-    Object.assign(a, { name: f.name, inst: f.inst, type: f.type, balance: nb });
+    Object.assign(a, { name: f.name, inst: f.inst, type: f.type, balance: nb, currency: f.currency, share: Math.max(0, Math.min(100, parseFloat(f.share) || 0)) / 100 });
+    FX.refresh(true).then(() => { FX.reconvert(); save(); render(); });
     if (isNew) S.accounts.push(a);
     snapshot();
   });
@@ -309,6 +347,9 @@ $('#view').addEventListener('click', e => {
 });
 $('#view').addEventListener('change', async e => {
   const el = e.target;
+  if (el.id === 'maincur') { S.settings.currency = el.value; save(); toast('Conversion en cours…'); await FX.refresh(true); FX.reconvert(); save(); snapshot(); render(); }
+  if (el.id === 'front') { S.settings.frontalier = !!el.value; save(); render(); }
+  if (el.id === 'canton') { S.settings.canton = el.value; save(); }
   if (el.id === 'savtarget') { S.settings.savingsTarget = Math.max(0, Math.min(90, parseFloat(el.value) || 0)); save(); }
   if (el.dataset.nature) { (S.settings.nature = S.settings.nature || {})[el.dataset.nature] = el.value; save(); }
   if (el.dataset.budget) { S.budgets[el.dataset.budget] = parseFloat(el.value) || 0; save(); }
@@ -333,6 +374,7 @@ async function importFiles(files) {
       const x = ingest(acc, r); added += x.added; dup += x.dup;
     } catch (err) { toast(`${f.name} : ${err.message}`); }
   }
+  if (await FX.refresh()) linkTransfers();
   save(); snapshot();
   if (added) { const last = S.tx.filter(t => t.acc === acc.id).map(t => t.date).sort().pop(); if (last) month = ym(last); }
   toast(`${added} opérations ajoutées${dup ? `, ${dup} doublons ignorés` : ''}`);
@@ -348,10 +390,14 @@ function ingest(acc, r) {
     const h = acc.id + '|' + base + '|' + counts[base];
     if (seen.has(h)) { dup++; continue; }
     seen.add(h);
-    const tx = { id: uid(), acc: acc.id, date: t.date, amount: t.amount, label: t.label, hash: h };
+    const cur = FX.accCur(acc);
+    const tx = { id: uid(), acc: acc.id, date: t.date, orig: t.amount, cur, amount: Math.round(t.amount * FX.rateAt(cur, t.date) * 100) / 100, label: t.label, hash: h };
     tx.cat = categorize(tx);
+    // Sur un compte joint, un crédit non identifié est en général l'apport du conjoint : pas un revenu
+    if ((acc.share ?? 1) < 1 && tx.cat === 'Autres revenus') tx.cat = 'Virement interne';
     S.tx.push(tx); added++;
   }
+  if (added) linkTransfers();
   if (r.balance && !isNaN(r.balance.value) && (!acc.balanceDate || r.balance.date >= acc.balanceDate)) { acc.balance = r.balance.value; acc.balanceDate = r.balance.date; }
   return { added, dup };
 }
@@ -391,4 +437,5 @@ async function checkLock() {
 if ('serviceWorker' in navigator && location.protocol !== 'file:') navigator.serviceWorker.register('sw.js').catch(() => {});
 if (navigator.storage && navigator.storage.persist) navigator.storage.persist();
 checkLock(); snapshot(); render();
+FX.reconvert(); FX.refresh().then(ch => { if (ch) { linkTransfers(); save(); snapshot(); render(); } });
 Bank.handleRedirect().then(() => Bank.sync()).catch(() => {});

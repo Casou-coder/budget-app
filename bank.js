@@ -5,7 +5,8 @@
 // Doc API : https://enablebanking.com/docs/api/reference/
 'use strict';
 const Bank = (() => {
-  const cfg = () => (S.bank = S.bank || { apiBase: 'https://api.enablebanking.com', links: [] });
+  // L'Application ID n'est pas secret (sans la clé privée, il ne permet rien) : on le pré-remplit.
+  const cfg = () => (S.bank = S.bank || { apiBase: 'https://api.enablebanking.com', appId: 'de3e8fb5-4975-40f0-b0a6-b4bbc066f98f', links: [] });
   const b64url = buf => btoa(String.fromCharCode(...new Uint8Array(buf))).replace(/=+$/, '').replace(/\+/g, '-').replace(/\//g, '_');
   const b64urlStr = s => b64url(new TextEncoder().encode(s));
   const redirectUrl = () => cfg().redirect || (location.origin + location.pathname.replace(/[^/]*$/, ''));
@@ -59,7 +60,12 @@ const Bank = (() => {
       const iban = ((acc.account_id || {}).iban || '').slice(-4);
       const type = /SVGS|SAVINGS|LIVRET/i.test(acc.cash_account_type + ' ' + acc.name) ? 'epargne' : 'courant';
       let local = S.accounts.find(a => a.remote === uidAcc);
-      if (!local) { local = { id: uid(), name: `${link.bank}${acc.name ? ' · ' + acc.name : ''}${iban ? ' ' + iban : ''}`, inst: link.bank, type, balance: 0, positions: [], remote: uidAcc }; S.accounts.push(local); }
+      if (!local) {
+        const label = [acc.name, acc.product, acc.details].filter(Boolean).join(' ');
+        const joint = /joint|\bm\.? (ou|et) mme|\bmr (ou|et) mme|\bmme (ou|et) m\b|\bmlle (ou|et)\b/i.test(label);
+        local = { id: uid(), name: `${link.bank}${acc.name ? ' · ' + acc.name : ''}${acc.currency && acc.currency !== 'EUR' ? ' ' + acc.currency : ''}${iban ? ' ' + iban : ''}`, inst: link.bank, type, balance: 0, positions: [], remote: uidAcc, currency: acc.currency || 'EUR', share: joint ? 0.5 : 1 };
+        S.accounts.push(local);
+      }
       link.accounts.push({ uid: uidAcc, local: local.id });
     }
     cfg().links = cfg().links.filter(l => l.bank !== link.bank).concat(link);
@@ -98,6 +104,7 @@ const Bank = (() => {
         a.lastDate = new Date().toISOString().slice(0, 10);
       } catch (e) { toast(`${acc.name} : ${e.message}`); }
     }
+    if (await FX.refresh()) linkTransfers(); // taux du jour de chaque opération en devise
     c.lastSync = Date.now(); save(); snapshot();
     if (added || force) toast(`Synchronisation : ${added} nouvelle(s) opération(s)`);
     render();
