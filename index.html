@@ -30,7 +30,7 @@ main{padding:0 16px;max-width:720px;margin:0 auto}
 .pos{color:var(--pos)}.neg{color:var(--neg)}.mut{color:var(--mut)}
 .row{display:flex;justify-content:space-between;align-items:center;gap:8px;padding:8px 0;border-bottom:1px solid var(--line)}
 .row:last-child{border-bottom:0}.row .t{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.row small{display:block;color:var(--mut);font-size:12px}
+.row small{display:block;color:var(--mut);font-size:12px;white-space:normal}
 .num{font-variant-numeric:tabular-nums;white-space:nowrap;font-weight:600}
 .bar{height:8px;background:var(--line);border-radius:4px;overflow:hidden;margin-top:4px}.bar i{display:block;height:100%;background:var(--acc)}
 .bar i.over{background:var(--neg)}
@@ -84,6 +84,7 @@ dialog::backdrop{background:#0008}
 <script src="period.js"></script>
 <script src="insights.js"></script>
 <script src="fx.js"></script>
+<script src="exchange.js"></script>
 <script src="bank.js"></script>
 <script src="app.js"></script>
 </body>

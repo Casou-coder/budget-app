@@ -8,7 +8,7 @@ const Insights = (() => {
     'Logement': 'besoin', 'Courses': 'besoin', 'Transport': 'besoin', 'Santé': 'besoin', 'Impôts': 'besoin',
     'Frais bancaires': 'besoin', 'Assurances': 'besoin', 'Téléphone & Internet': 'besoin',
     'Restaurants': 'envie', 'Loisirs': 'envie', 'Shopping': 'envie', 'Abonnements': 'envie', 'Voyages': 'envie',
-    'Cadeaux & dons': 'envie', 'Divers': 'envie'
+    'Cadeaux & dons': 'envie', 'Divers': 'envie', 'Frais de change': 'besoin'
   };
   const clamp = (x, a = 0, b = 1) => Math.max(a, Math.min(b, x));
   const ym = d => Period.of(d); // mois budgétaire
@@ -32,7 +32,11 @@ const Insights = (() => {
       const k = kindOf(t.cat);
       const amt = txAmt(t); // en euros, pondéré par la part du compte (compte joint)
       if (k === 'in') { r.income += amt; continue; }
-      if (k === 'move') { if (t.cat !== 'Virement interne' && !invest.has(t.acc)) r.placed -= amt; continue; }
+      if (k === 'move') {
+        if (!isInternal(t.cat) && !invest.has(t.acc)) r.placed -= amt;
+        const fee = fxFee(t); if (fee) { r.besoin += fee; r.out += fee; r.byCat['Frais de change'] = (r.byCat['Frais de change'] || 0) + fee; }
+        continue;
+      }
       const v = -amt; // dépense positive (remboursement = négatif)
       r[natureOf(S, t.cat)] += v; r.out += v;
       r.byCat[t.cat] = (r.byCat[t.cat] || 0) + v;
@@ -123,7 +127,11 @@ const Insights = (() => {
       const k = kindOf(t.cat), v = txAmt(t);
       if (k === 'in') b.income += v;
       else if (k === 'out') b[natureOf(S, t.cat)] -= v;
-      else { if (t.cat !== 'Virement interne' && !invest.has(t.acc)) b.placed -= v; continue; }
+      else {
+        if (!isInternal(t.cat) && !invest.has(t.acc)) b.placed -= v;
+        const fee = fxFee(t); if (fee) { b.besoin += fee; daily[t.date] = (daily[t.date] || 0) - fee; }
+        continue;
+      }
       daily[t.date] = (daily[t.date] || 0) + v;
     }
     const sum = k => ms.reduce((x, m) => x + per[m][k], 0), N = Math.max(1, ms.length);
@@ -179,7 +187,7 @@ const Insights = (() => {
   function recurring(S, kindOf) {
     const groups = {};
     for (const t of S.tx) {
-      if (t.amount >= 0 || kindOf(t.cat) === 'in' || t.cat === 'Virement interne') continue;
+      if (t.amount >= 0 || kindOf(t.cat) === 'in' || isInternal(t.cat)) continue;
       const k = merchant(t.label);
       (groups[k] = groups[k] || []).push(t);
     }
