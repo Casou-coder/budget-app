@@ -107,6 +107,40 @@ const Insights = (() => {
     return { key, ...PROFILES[key], a, s, n, w, traits, score, months };
   }
 
+  // ---------- bilan glissant : entrées / sorties sur N jours, indépendant des mois ----------
+  function flow(S, kindOf, n) {
+    const first = S.tx.map(t => t.date).sort()[0];
+    if (!first) return null;
+    const cur = Period.current();
+    // mois budgétaires complets (le premier mois partiel de l'historique est écarté)
+    const all = [...new Set(S.tx.map(t => ym(t.date)))].filter(m => m < cur && Period.range(m).start >= first).sort();
+    const ms = all.slice(-n);
+    const invest = new Set(S.accounts.filter(a => a.type === 'invest' || a.type === 'epargne').map(a => a.id));
+    const per = {}; for (const m of ms.concat(cur)) per[m] = { income: 0, besoin: 0, envie: 0, placed: 0 };
+    const from = ms.length ? Period.range(ms[0]).start : Period.range(cur).start, daily = {};
+    for (const t of S.tx) {
+      const m = ym(t.date), b = per[m]; if (!b) continue;
+      const k = kindOf(t.cat), v = txAmt(t);
+      if (k === 'in') b.income += v;
+      else if (k === 'out') b[natureOf(S, t.cat)] -= v;
+      else { if (t.cat !== 'Virement interne' && !invest.has(t.acc)) b.placed -= v; continue; }
+      daily[t.date] = (daily[t.date] || 0) + v;
+    }
+    const sum = k => ms.reduce((x, m) => x + per[m][k], 0), N = Math.max(1, ms.length);
+    const r = { from, months: ms.length, list: ms.map(m => ({ m, ...per[m], net: per[m].income - per[m].besoin - per[m].envie })), current: { m: cur, ...per[cur] } };
+    r.income = sum('income'); r.besoin = sum('besoin'); r.envie = sum('envie'); r.placed = sum('placed');
+    r.out = r.besoin + r.envie; r.net = r.income - r.out;
+    r.perMonth = { income: r.income / N, out: r.out / N, net: r.net / N, besoin: r.besoin / N, envie: r.envie / N, placed: r.placed / N };
+    r.rate = r.income > 0 ? r.net / r.income : 0;
+    r.year = r.perMonth.net * 12;
+    r.deficitMonths = r.list.filter(x => x.net < 0).length;
+    r.current.out = r.current.besoin + r.current.envie; r.current.net = r.current.income - r.current.out;
+    let c = 0; r.curve = [];
+    for (let d = new Date(from + 'T12:00'), end = today(); d.toISOString().slice(0, 10) <= end; d.setDate(d.getDate() + 1)) { const k = d.toISOString().slice(0, 10); c += daily[k] || 0; r.curve.push([k, c]); }
+    r.short = ms.length < 2;
+    return r;
+  }
+
   // ---------- reste à dépenser aujourd'hui ----------
   function daily(S, kindOf) {
     const ref = aggregate(S, kindOf, refMonths(S, 3));
@@ -201,5 +235,5 @@ const Insights = (() => {
 
   const fmt = n => (n || 0).toLocaleString('fr-FR', { style: 'currency', currency: S.settings.currency || 'EUR', maximumFractionDigits: 0 });
   const pct = x => Math.round(x * 100) + ' %';
-  return { NATURE, natureOf, profile, daily, priorities, recurring, tips, suggestedBudgets, aggregate, refMonths, merchant, pct };
+  return { NATURE, natureOf, profile, daily, flow, priorities, recurring, tips, suggestedBudgets, aggregate, refMonths, merchant, pct };
 })();

@@ -140,6 +140,7 @@ views.dash = () => {
   const nat = Object.entries(s.byCat).reduce((o, [c, v]) => (o[Insights.natureOf(S, c)] += v, o), { besoin: 0, envie: 0 });
   const p = Insights.profile(S, kindOf);
   return `
+  ${isCur ? bilanCard() : ''}
   ${Period.label(month) ? `<div class="mut" style="font-size:13px;margin:2px 2px 0">Mois budgétaire ${Period.label(month)} · paie le ${Period.payday()}</div>` : ''}
   ${isCur && d.income > 0 ? `<div class="card" style="border-color:var(--acc)">
     <h2>Aujourd’hui, vous pouvez dépenser</h2>
@@ -175,6 +176,38 @@ views.dash = () => {
     ${stats.map(([m, x]) => `<div class="row"><span class="t">${monthName(m)}</span><span class="num ${x.net >= 0 ? 'pos' : 'neg'}">${x.net >= 0 ? '+' : ''}${fmt(x.net)}</span></div>`).reverse().join('')}
   </div>`;
 };
+// Bilan global : est-ce que je dépense plus que je ne gagne ? combien puis-je épargner ?
+function bilanCard() {
+  const nM = S.settings.bilanMonths || 6, f = Insights.flow(S, kindOf, nM);
+  if (!f || (f.income <= 0 && f.current.income <= 0)) return '';
+  const pm = f.perMonth, ok = pm.net >= 0;
+  const pts = f.curve, n = pts.length, vals = pts.map(p => p[1]);
+  const lo = Math.min(0, ...vals), hi = Math.max(0, ...vals), W = 300, H = 70;
+  const X = i => (i / Math.max(1, n - 1)) * W, Y = v => H - (v - lo) / Math.max(1, hi - lo) * H;
+  const path = pts.map((p, i) => `${i ? 'L' : 'M'}${X(i).toFixed(1)},${Y(p[1]).toFixed(1)}`).join('');
+  const sel = [3, 6, 12].map(d => `<button class="btn sm ${d === nM ? '' : 'sec'}" data-bilan="${d}">${d} mois</button>`).join(' ');
+  const c = f.current;
+  return `<div class="card" style="border-color:${ok ? 'var(--pos)' : 'var(--neg)'}">
+    <h2>Bilan global : entrées et sorties</h2>
+    <div style="display:flex;gap:6px;margin-bottom:10px">${sel}</div>
+    ${f.months ? `<div class="mut" style="font-size:12px;margin-bottom:6px">Moyenne sur ${f.months} mois budgétaire${f.months > 1 ? 's' : ''} complet${f.months > 1 ? 's' : ''} (chaque salaire face aux dépenses qu’il finance)${f.deficitMonths ? ` · ${f.deficitMonths} mois en déficit` : ''}</div>` : ''}
+    ${!f.months ? '<p class="mut">Pas encore de mois complet : le bilan apparaîtra après votre prochaine paie.</p>' : ''}
+    <div style="font-size:15px;margin-bottom:6px;${f.months ? '' : 'display:none'}">${ok
+      ? `✅ Vous gagnez <b>plus</b> que vous ne dépensez : vous pouvez épargner <b class="pos">${fmt(pm.net)} par mois</b> en moyenne, soit environ <b>${fmt(f.year)} par an</b>.`
+      : `⚠️ Vous dépensez <b>plus</b> que vous ne gagnez : <b class="neg">${fmt(-pm.net)} par mois</b> en moyenne. Votre épargne diminue.`}</div>
+    <div class="row"><span class="t">Entrées moyennes / mois</span><span class="num pos">${fmt(pm.income)}</span></div>
+    <div class="row"><span class="t">Sorties moyennes / mois<small>obligatoires ${fmt(pm.besoin)} · envies ${fmt(pm.envie)}</small></span><span class="num neg">${fmt(pm.out)}</span></div>
+    <div class="row"><span class="t"><b>Capacité d’épargne / mois</b><small>taux d’épargne ${Math.round(f.rate * 100)} %${pm.placed > 0 ? ` · déjà placé ${fmt(pm.placed)}/mois` : ''}</small></span><span class="num ${ok ? 'pos' : 'neg'}">${ok ? '+' : ''}${fmt(pm.net)}</span></div>
+    <div class="row"><span class="t" style="white-space:normal">Mois en cours<small>${Period.label(c.m) || monthName(c.m)} · entrées ${fmt(c.income)} · sorties ${fmt(c.out)}</small></span><span class="num ${c.net >= 0 ? 'pos' : 'neg'}">${c.net >= 0 ? '+' : ''}${fmt(c.net)}</span></div>
+    ${f.list.length > 1 ? `<details><summary class="mut">Détail mois par mois</summary>${f.list.slice().reverse().map(x => `<div class="row"><span class="t">${monthName(x.m)}<small>entrées ${fmt(x.income)} · sorties ${fmt(x.besoin + x.envie)}</small></span><span class="num ${x.net >= 0 ? 'pos' : 'neg'}">${x.net >= 0 ? '+' : ''}${fmt(x.net)}</span></div>`).join('')}</details>` : ''}
+    <svg viewBox="0 0 ${W} ${H + 4}" style="width:100%;height:80px;margin-top:8px" preserveAspectRatio="none" aria-label="Solde cumulé entrées moins sorties">
+      <line x1="0" x2="${W}" y1="${Y(0).toFixed(1)}" y2="${Y(0).toFixed(1)}" stroke="var(--line)" stroke-dasharray="4 3"/>
+      <path d="${path}" fill="none" stroke="${ok ? 'var(--pos)' : 'var(--neg)'}" stroke-width="2" vector-effect="non-scaling-stroke"/></svg>
+    <div class="mut" style="font-size:12px;display:flex;justify-content:space-between"><span>${f.from.split('-').reverse().join('/')}</span><span>cumul ${f.net >= 0 ? '+' : ''}${fmt(f.net)}</span><span>aujourd’hui</span></div>
+    ${f.short ? '<p class="mut" style="font-size:12px;margin:6px 0 0">Historique court : le bilan sera plus fiable avec plusieurs mois de données.</p>' : ''}
+    <p class="mut" style="font-size:12px;margin:6px 0 0">La courbe montre le solde cumulé (entrées − sorties) depuis le début de la période. Les virements entre vos comptes sont exclus, et le compte joint ne compte que pour votre part.</p>
+  </div>`;
+}
 function barRow(label, spent, budget) {
   const p = budget ? spent / budget * 100 : 0;
   return `<div class="row"><span class="t">${esc(label)} <small>${fmt(spent)} / ${fmt(budget)} · reste ${fmt(budget - spent)}</small><div class="bar"><i class="${p > 100 ? 'over' : ''}" style="width:${Math.min(100, p).toFixed(1)}%"></i></div></span><span class="num ${p > 100 ? 'neg' : ''}">${Math.round(p)} %</span></div>`;
@@ -343,6 +376,7 @@ function editTx(t) {
 $('#view').addEventListener('click', e => {
   const el = e.target.closest('[data-tx],[data-acc],[data-asset],[data-goto],button');
   if (!el || el.dataset.bank) return;
+  if (el.dataset.bilan) { S.settings.bilanMonths = +el.dataset.bilan; save(); return render(); }
   if (el.dataset.goto) { view = el.dataset.goto; render(); return scrollTo(0, 0); }
   if (el.dataset.tx) return editTx(S.tx.find(t => t.id === el.dataset.tx));
   if (el.dataset.acc) return editAccount(S.accounts.find(a => a.id === el.dataset.acc));
