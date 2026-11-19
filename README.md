@@ -84,3 +84,20 @@ Les doublons sont ignorés. Pour un même compte, choisissez **une seule** méth
 ## Tester
 
 Le dossier `exemples/` contient des relevés fictifs, dont `cic-4-mois.csv` qui permet d'obtenir un profil complet.
+
+## Partager l'app avec des proches
+
+L'app est conçue pour plusieurs utilisateurs : rien de personnel n'est écrit dans le code, et chaque
+personne a ses propres données, sur son propre téléphone.
+
+- **Import de fichiers, budget, profil, change de devises** : il suffit d'ouvrir le lien de l'app et de
+  l'ajouter à l'écran d'accueil.
+- **Connexion bancaire automatique** : en mode « restreint » (gratuit), une application Enable Banking
+  ne donne accès qu'aux comptes que son propriétaire a liés. Chaque personne crée donc **sa propre
+  application Enable Banking** (Application ID + clé .pem) et la saisit dans *Import › Paramètres de l'API*.
+  Pour ouvrir la connexion à tous sans cette étape, il faudrait passer l'application en production
+  complète chez Enable Banking (contrat, et sans doute payant).
+- **Relais Cloudflare** : un même relais peut servir à tous les utilisateurs de l'app, car il ne fait que
+  transmettre les requêtes signées par chaque téléphone.
+- **Change de devises** : Telexoo, Revolut, Wise, Swissquote, etc. sont reconnus. Pour ajouter un autre
+  service, il suffit d'ajouter une règle « Change de devises » dans *Réglages › Règles*.

@@ -5,8 +5,7 @@
 // Doc API : https://enablebanking.com/docs/api/reference/
 'use strict';
 const Bank = (() => {
-  // L'Application ID n'est pas secret (sans la clé privée, il ne permet rien) : on le pré-remplit.
-  const cfg = () => (S.bank = S.bank || { apiBase: 'https://api.enablebanking.com', appId: 'de3e8fb5-4975-40f0-b0a6-b4bbc066f98f', links: [] });
+    const cfg = () => (S.bank = S.bank || { apiBase: 'https://api.enablebanking.com', links: [] });
   const b64url = buf => btoa(String.fromCharCode(...new Uint8Array(buf))).replace(/=+$/, '').replace(/\+/g, '-').replace(/\//g, '_');
   const b64urlStr = s => b64url(new TextEncoder().encode(s));
   const redirectUrl = () => cfg().redirect || (location.origin + location.pathname.replace(/[^/]*$/, ''));

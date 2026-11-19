@@ -6,7 +6,8 @@ const CATS = {
   'Logement': 'out', 'Courses': 'out', 'Restaurants': 'out', 'Transport': 'out', 'Abonnements': 'out',
   'Santé': 'out', 'Loisirs': 'out', 'Shopping': 'out', 'Impôts': 'out', 'Frais bancaires': 'out', 'Assurances': 'out', 'Téléphone & Internet': 'out',
   'Voyages': 'out', 'Cadeaux & dons': 'out', 'Divers': 'out',
-  'Épargne': 'move', 'Investissement': 'move', 'Virement interne': 'move'
+  'Frais de change': 'out',
+  'Épargne': 'move', 'Investissement': 'move', 'Virement interne': 'move', 'Change de devises': 'move'
 };
 const DEFAULT_RULES = [
   ['airbnb|booking.com|air france|easyjet|ryanair|transavia|vueling|hotel|abritel|expedia', 'Voyages'],
@@ -28,6 +29,7 @@ const DEFAULT_RULES = [
   ['cntfs|lamal|cpam frontalier|cmu frontalier|groupe mutuel|helsana|css assurance|swica|assura', 'Assurances'],
   ['assurance|axa|maif|macif|matmut|allianz|generali|groupama|alan ', 'Assurances'],
   ['don |dons |croix rouge|unicef|leetchi|lydia cagnotte|cadeau', 'Cadeaux & dons'],
+  ['telexoo|revolut|transferwise|wise |swissquote|ibanfirst|kantox|western union|change devise|change de devise|conversion devise', 'Change de devises'],
   ['deposit|einzahlung|removal|auszahlung|vir interne|virement interne|vir de m|vir sepa m', 'Virement interne']
 ].map(([kw, cat]) => ({ kw, cat }));
 
@@ -64,21 +66,30 @@ function categorize(tx) {
 // Un compte joint compte pour la part de l'utilisateur (ex. 50 %) dans le budget et le patrimoine.
 function shareOf(accId) { const a = S.accounts.find(x => x.id === accId); return a && a.share != null ? a.share : 1; }
 function txAmt(t) { return t.amount * shareOf(t.acc); }
-// Repère les virements entre vos propres comptes (même montant, signe opposé, à 4 jours près)
+const isInternal = c => c === 'Virement interne' || c === 'Change de devises';
+// Catégorie automatique d'une opération (règles + cas du compte joint)
+function autoCat(t) {
+  const c = categorize(t);
+  return shareOf(t.acc) < 1 && c === 'Autres revenus' ? 'Virement interne' : c;
+}
+// Repère les mouvements entre vos propres comptes (recalcul complet à chaque import) :
+// 1) virements dans la même devise (montant identique, signe opposé, 5 jours max)
+// 2) changes de devises (Telexoo, Revolut, banque…) : voir exchange.js
 function linkTransfers() {
+  Exchange.reset(autoCat);
   const list = S.tx.filter(t => !t.manual).sort((a, b) => a.date.localeCompare(b.date));
-  const used = new Set(S.tx.filter(t => t.paired).map(t => t.id));
+  const used = new Set();
   for (const d of list) {
     if (d.amount >= 0 || used.has(d.id)) continue;
     const t0 = new Date(d.date).getTime();
-    const c = list.find(x => {
-      if (used.has(x.id) || x.acc === d.acc || x.amount <= 0 || Math.abs(new Date(x.date).getTime() - t0) > 5 * 864e5) return false;
-      if ((x.cur || 'EUR') === (d.cur || 'EUR')) return Math.abs(x.orig + d.orig) < 0.01;
-      return Math.abs(x.amount + d.amount) <= Math.abs(d.amount) * 0.03; // change de devise : frais et écart de taux
-    });
+    const c = list.find(x => !used.has(x.id) && x.acc !== d.acc && x.amount > 0 && (x.cur || 'EUR') === (d.cur || 'EUR')
+      && Math.abs(x.orig + d.orig) < 0.01 && Math.abs(new Date(x.date).getTime() - t0) <= 5 * 864e5);
     if (c) { d.cat = c.cat = 'Virement interne'; d.paired = c.paired = true; used.add(d.id); used.add(c.id); }
   }
+  Exchange.link();
 }
+// Coût réel d'un change (écart avec le taux BCE), compté comme une dépense « Frais de change »
+const fxFee = t => t.fx && t.fx.cost ? t.fx.cost * shareOf(t.acc) : 0;
 
 // Détecte le salaire même si le libellé est inconnu : même émetteur, chaque mois, montant important
 function detectSalary() {
@@ -100,7 +111,10 @@ function monthStats(m) {
     const v = txAmt(t);
     if (k === 'in') res.in += v;
     else if (k === 'out') { res.out -= v; res.byCat[t.cat] = (res.byCat[t.cat] || 0) - v; }
-    else if (t.cat !== 'Virement interne' && !invest.has(t.acc)) res.move -= v; // argent sorti vers épargne/placements
+    else {
+      if (!isInternal(t.cat) && !invest.has(t.acc)) res.move -= v; // argent sorti vers épargne/placements
+      const fee = fxFee(t); if (fee) { res.out += fee; res.byCat['Frais de change'] = (res.byCat['Frais de change'] || 0) + fee; }
+    }
   }
   res.net = res.in - res.out;
   res.rate = res.in > 0 ? res.net / res.in : 0;
@@ -154,6 +168,7 @@ views.dash = () => {
       <div class="row"><span class="t">Taux du jour<small>90 j : min ${f.min.toLocaleString('fr-FR', { minimumFractionDigits: 4, maximumFractionDigits: 4 })} · max ${f.max.toLocaleString('fr-FR', { minimumFractionDigits: 4, maximumFractionDigits: 4 })}</small></span><span class="num">1 ${f.cur} = ${f.rate.toLocaleString('fr-FR', { minimumFractionDigits: 4, maximumFractionDigits: 4 })} ${FX.main()}</span></div>
       <div class="row"><span class="t">Budget calculé au taux prudent<small>le plus bas des 90 derniers jours</small></span><span class="num">${fmt(f.prudent)}</span></div>
       <p class="mut" style="font-size:13px;margin:6px 0 0">1 centime de variation du taux = ${fmt(f.perCent)} par mois sur votre salaire.</p></div>`; })()}
+  ${exchangeCard()}
   ${p.score != null ? `<div class="card" data-goto="profile" style="display:flex;align-items:center;gap:12px"><span style="font-size:34px">${p.e}</span><div style="flex:1"><b>${p.name}</b><div class="mut" style="font-size:13px">Score de santé financière ${p.score}/100 · voir l’analyse ›</div></div></div>` : ''}
   <div class="kpis">
     <div class="kpi big"><div class="l">Reste à vivre / épargne du mois</div><div class="v ${s.net >= 0 ? 'pos' : 'neg'}">${fmt(s.net)}</div>
@@ -206,6 +221,23 @@ function bilanCard() {
     <div class="mut" style="font-size:12px;display:flex;justify-content:space-between"><span>${f.from.split('-').reverse().join('/')}</span><span>cumul ${f.net >= 0 ? '+' : ''}${fmt(f.net)}</span><span>aujourd’hui</span></div>
     ${f.short ? '<p class="mut" style="font-size:12px;margin:6px 0 0">Historique court : le bilan sera plus fiable avec plusieurs mois de données.</p>' : ''}
     <p class="mut" style="font-size:12px;margin:6px 0 0">La courbe montre le solde cumulé (entrées − sorties) depuis le début de la période. Les virements entre vos comptes sont exclus, et le compte joint ne compte que pour votre part.</p>
+  </div>`;
+}
+// Changes de devises : ce que vous avez converti, à quel taux, et ce que ça vous a coûté
+function exchangeCard() {
+  const h = Exchange.history(365);
+  if (!h.ops.length) return '';
+  const f4 = x => x.toLocaleString('fr-FR', { minimumFractionDigits: 4, maximumFractionDigits: 4 });
+  const pct = x => (x * 100).toLocaleString('fr-FR', { maximumFractionDigits: 2 }) + ' %';
+  const bank = h.sentMain * 0.015; // repère : conversion bancaire classique ≈ 1,5 %
+  const provs = Object.entries(h.byProv).sort((a, b) => b[1].n - a[1].n);
+  return `<div class="card"><h2>💱 Mes changes de devises (12 mois)</h2>
+    <p class="mut" style="font-size:13px;margin:0 0 6px">Les montants convertis ne sont <b>ni des dépenses ni des revenus</b> : c’est votre argent qui change de devise. Seul l’écart avec le taux officiel (BCE) est compté, en « Frais de change ».</p>
+    <div class="row"><span class="t">Converti<small>${h.ops.length} opération(s)</small></span><span class="num">${fmt(h.sentMain)}</span></div>
+    <div class="row"><span class="t">Coût réel du change<small>écart moyen avec le taux BCE : ${pct(h.spread)}</small></span><span class="num ${h.cost > 0 ? 'neg' : 'pos'}">${h.cost > 0 ? '−' : '+'}${fmt(Math.abs(h.cost))}</span></div>
+    ${bank > h.cost ? `<div class="row"><span class="t">Économisé vs conversion bancaire<small>repère : environ 1,5 % de marge en banque classique</small></span><span class="num pos">+${fmt(bank - h.cost)}</span></div>` : ''}
+    ${provs.length > 1 ? provs.map(([n, b]) => `<div class="row"><span class="t">${esc(n)}<small>${b.n} change(s)</small></span><span class="num">${pct(b.sent ? b.cost / b.sent : 0)}</span></div>`).join('') : ''}
+    <details><summary class="mut">Détail des changes</summary>${h.ops.slice(0, 12).map(o => `<div class="row"><span class="t" style="white-space:normal">${o.date.split('-').reverse().join('/')} · ${esc(o.provider)}<small>${fmtCur(o.sent, o.sentCur)} → ${o.recv.toLocaleString('fr-FR', { style: 'currency', currency: o.recvCur })} · taux ${f4(o.rate)} (BCE ${f4(o.ref)})</small></span><span class="num ${o.cost > 0 ? 'neg' : 'pos'}">${o.cost > 0 ? '−' : '+'}${fmt2(Math.abs(o.cost))}</span></div>`).join('')}</details>
   </div>`;
 }
 function barRow(label, spent, budget) {
@@ -442,7 +474,7 @@ function ingest(acc, r) {
     const tx = { id: uid(), acc: acc.id, date: t.date, orig: t.amount, cur, amount: Math.round(t.amount * FX.rateAt(cur, t.date) * 100) / 100, label: t.label, hash: h };
     tx.cat = categorize(tx);
     // Sur un compte joint, un crédit non identifié est en général l'apport du conjoint : pas un revenu
-    if ((acc.share ?? 1) < 1 && tx.cat === 'Autres revenus') tx.cat = 'Virement interne';
+    tx.cat = autoCat(tx);
     S.tx.push(tx); added++;
   }
   if (added) { linkTransfers(); detectSalary(); }
@@ -484,7 +516,7 @@ async function checkLock() {
 
 if ('serviceWorker' in navigator && location.protocol !== 'file:') navigator.serviceWorker.register('sw.js').catch(() => {});
 if (navigator.storage && navigator.storage.persist) navigator.storage.persist();
-detectSalary(); linkTransfers(); save(); month = Period.current();
+linkTransfers(); detectSalary(); save(); month = Period.current();
 checkLock(); snapshot(); render();
 FX.reconvert(); FX.refresh().then(ch => { if (ch) { linkTransfers(); save(); snapshot(); render(); } });
 Bank.handleRedirect().then(() => Bank.sync()).catch(() => {});
