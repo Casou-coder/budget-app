@@ -1,0 +1,4 @@
+Date;Type;Value;Note;ISIN;Shares;Fees;Taxes
+2026-11-10;Deposit;300.00;;;;;
+2026-11-11;Buy;-250.00;iShares Core MSCI World;IE00B4L5Y983;2.5;-1.00;
+2026-11-30;Interest;4.12;;;;;

@@ -1,0 +1,88 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#0f172a">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="icon-180.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Budget">
+<title>Mon Budget</title>
+<style>
+:root{--bg:#f6f7fb;--card:#fff;--fg:#0f172a;--mut:#64748b;--line:#e2e8f0;--acc:#2563eb;--pos:#16a34a;--neg:#dc2626;--warn:#d97706}
+@media (prefers-color-scheme:dark){:root{--bg:#0b1120;--card:#111a2e;--fg:#e2e8f0;--mut:#94a3b8;--line:#1e293b;--acc:#60a5fa;--pos:#4ade80;--neg:#f87171;--warn:#fbbf24}}
+*{box-sizing:border-box}
+html{-webkit-text-size-adjust:100%}
+body{-webkit-user-select:none;user-select:none;margin:0;font:15px/1.4 system-ui,-apple-system,Segoe UI,Roboto,sans-serif;background:var(--bg);color:var(--fg);padding-bottom:calc(70px + env(safe-area-inset-bottom))}
+header{position:sticky;top:0;z-index:5;background:var(--bg);padding:calc(10px + env(safe-area-inset-top)) 16px 8px;display:flex;align-items:center;gap:8px}
+header h1{font-size:20px;margin:0;flex:1}
+main{padding:0 16px;max-width:720px;margin:0 auto}
+.card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:14px;margin:10px 0}
+.card h2{font-size:15px;margin:0 0 10px;color:var(--mut);font-weight:600}
+.kpis{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.kpi{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:12px}
+.kpi .l{font-size:12px;color:var(--mut)}.kpi .v{font-size:20px;font-weight:700;font-variant-numeric:tabular-nums}
+.big .v{font-size:28px}.big{grid-column:1/-1}
+.pos{color:var(--pos)}.neg{color:var(--neg)}.mut{color:var(--mut)}
+.row{display:flex;justify-content:space-between;align-items:center;gap:8px;padding:8px 0;border-bottom:1px solid var(--line)}
+.row:last-child{border-bottom:0}.row .t{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.row small{display:block;color:var(--mut);font-size:12px}
+.num{font-variant-numeric:tabular-nums;white-space:nowrap;font-weight:600}
+.bar{height:8px;background:var(--line);border-radius:4px;overflow:hidden;margin-top:4px}.bar i{display:block;height:100%;background:var(--acc)}
+.bar i.over{background:var(--neg)}
+.chart{display:flex;align-items:flex-end;gap:6px;height:140px;padding-top:10px}
+.chart .c{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:flex-end;height:100%;font-size:11px;color:var(--mut)}
+.chart .pair{display:flex;gap:2px;align-items:flex-end;height:100%;width:100%;justify-content:center}
+.chart .pair i{width:40%;border-radius:3px 3px 0 0;min-height:2px}
+.in{background:var(--pos)}.out{background:var(--neg)}
+nav{position:fixed;bottom:0;left:0;right:0;display:flex;background:var(--card);border-top:1px solid var(--line);padding-bottom:env(safe-area-inset-bottom);z-index:9}
+nav button{flex:1;border:0;background:none;color:var(--mut);padding:8px 0;font-size:10.5px;-webkit-tap-highlight-color:transparent}
+nav button b{display:block;font-size:20px;font-weight:400}
+nav button.on{color:var(--acc)}
+button,select,input{font:inherit;color:inherit}
+.btn{background:var(--acc);color:#fff;border:0;border-radius:10px;padding:10px 14px;font-weight:600}
+.btn.sec{background:var(--line);color:var(--fg)}.btn.sm{padding:6px 10px;font-size:13px}
+input,select{font-size:16px;background:var(--bg);border:1px solid var(--line);border-radius:10px;padding:9px 10px;width:100%}
+label{display:block;font-size:13px;color:var(--mut);margin:8px 0 4px}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.tag{display:inline-block;font-size:11px;padding:2px 8px;border-radius:99px;background:var(--line);color:var(--fg)}
+.hide{display:none!important}
+input{-webkit-user-select:text;user-select:text}
+details summary{cursor:pointer;font-size:13px}
+.toast{position:fixed;left:16px;right:16px;bottom:90px;background:var(--fg);color:var(--bg);padding:12px;border-radius:10px;text-align:center;z-index:20}
+dialog{border:0;border-radius:14px;background:var(--card);color:var(--fg);width:min(94vw,520px);padding:16px}
+dialog::backdrop{background:#0008}
+.lock{position:fixed;inset:0;background:var(--bg);z-index:50;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;padding:24px}
+</style>
+</head>
+<body>
+<div id="lock" class="lock hide">
+  <h2>🔒 Mon Budget</h2>
+  <input id="pin" type="password" inputmode="numeric" placeholder="Code" style="max-width:200px;text-align:center">
+  <button class="btn" id="unlock">Déverrouiller</button>
+  <small class="mut" id="lockmsg"></small>
+</div>
+<header>
+  <h1 id="title">Tableau de bord</h1>
+  <select id="month" style="width:auto"></select>
+</header>
+<main id="view"></main>
+<nav id="nav">
+  <button data-v="dash" class="on"><b>◎</b>Budget</button>
+  <button data-v="profile"><b>☺</b>Profil</button>
+  <button data-v="tx"><b>≡</b>Opérations</button>
+  <button data-v="wealth"><b>▲</b>Patrimoine</button>
+  <button data-v="import"><b>⇪</b>Import</button>
+  <button data-v="settings"><b>⚙</b>Réglages</button>
+</nav>
+<dialog id="dlg"></dialog>
+<script src="parsers.js"></script>
+<script src="insights.js"></script>
+<script src="bank.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
